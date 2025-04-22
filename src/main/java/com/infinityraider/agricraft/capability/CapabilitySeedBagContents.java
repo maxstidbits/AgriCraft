@@ -138,7 +138,7 @@ public class CapabilitySeedBagContents implements IInfSerializableCapabilityImpl
             if(this.contents.size() > 0) {
                 this.contents.sort(this.subSorter);
                 this.firstStack = this.contents.get(0).initializeStack();
-                this.firstStack = this.contents.get(this.contents.size() - 1).initializeStack();
+                this.lastStack = this.contents.get(this.contents.size() - 1).initializeStack();
             }
         }
 
