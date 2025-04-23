@@ -22,8 +22,9 @@ import com.infinityraider.agricraft.reference.AgriToolTips;
 import com.infinityraider.agricraft.reference.Names;
 import com.infinityraider.infinitylib.item.ItemBase;
 import net.minecraft.core.BlockPos;
-import net.minecraft.nbt.Tag;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.Tag;
+// import net.minecraft.nbt.ListTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.TranslatableComponent;
 import net.minecraft.world.InteractionHand;
@@ -201,95 +202,94 @@ public class ItemSeedBag extends ItemBase implements IAgriSeedBagItem {
 
     protected boolean attemptExtractOrInsertSeed(Player player, Contents contents) {
         // insertion / extraction of seeds is always executed from the main hand
+        boolean success = false;
+
         ItemStack held = player.getItemInHand(InteractionHand.MAIN_HAND);
-        if(held.isEmpty()) {
+        ItemStack bag = player.getItemInHand(InteractionHand.OFF_HAND);
+        
+        if (held.isEmpty()) {
             boolean last = player.isDiscrete();
-            if(last) {
+            if (last) {
                 ItemStack out = contents.extractLastSeed(1, true);
-                if(!out.isEmpty()) {
+                if (!out.isEmpty()) {
                     player.setItemInHand(InteractionHand.MAIN_HAND, contents.extractLastSeed(1, false));
-                    return true;
+                    success = true;
                 }
             } else {
                 ItemStack out =  contents.extractFirstSeed(1, true);
-                if(!out.isEmpty()) {
+                if (!out.isEmpty()) {
                     player.setItemInHand(InteractionHand.MAIN_HAND, contents.extractFirstSeed(1, false));
-                    return true;
+                    success = true;
                 }
             }
-        } else if(held.getItem() instanceof ItemDynamicAgriSeed) {
+        } else if (held.getItem() instanceof ItemDynamicAgriSeed) {
             ItemStack remaining = contents.insertSeed(held, true);
-            if(remaining.isEmpty() || remaining.getCount() != held.getCount()) {
+            if (remaining.isEmpty() || remaining.getCount() != held.getCount()) {
                 player.setItemInHand(InteractionHand.MAIN_HAND, contents.insertSeed(held, false));
-                return true;
+                success = true;
             }
         }
-        return false;
+        // if (success) {
+        //     this.getContentsImpl(bag).ifPresent(data -> {
+        //         CompoundTag tag = bag.getOrCreateTag();
+        //         tag.put(CapabilitySeedBagContents.KEY.toString(), data.serializeNBT());
+        //         bag.setTag(tag);
+        //         this.readShareTag(bag, tag);
+        //     });
+        // }
+        
+        return success;
     }
+
+    // https://github.com/MinecraftForge/MinecraftForge/issues/7359
+    // opening in creative inventory deletes capability tags
 
     @Nullable
     @Override
     public CompoundTag getShareTag(ItemStack stack) {
-        // on the dedicated‐server, we want to send both enchantments and our own data
         if (FMLEnvironment.dist == Dist.DEDICATED_SERVER) {
-            // grab whatever super would’ve shared (this already includes the vanilla “Enchantments” list)
-            final CompoundTag superTag = super.getShareTag(stack);
-            final CompoundTag tag = (superTag != null) ? superTag : new CompoundTag();
-            // now stick in our seed‐bag NBT
+            CompoundTag tag = stack.hasTag() ? stack.getTag() : new CompoundTag();
+            // now append your seed-bag data
             this.getContentsImpl(stack).ifPresent(data ->
                 tag.put(CapabilitySeedBagContents.KEY.toString(), data.serializeNBT())
             );
             return tag;
+        } else {
+            return super.getShareTag(stack);
         }
-        // on client or single‐player, fall back to default sharing
-        return super.getShareTag(stack);
     }
-    
+
     @Override
     public void readShareTag(ItemStack stack, @Nullable CompoundTag tag) {
-        // on the client, we need to both apply vanilla bits (enchantments, display, etc.)
-        // and then pull in our own data
-        if (FMLEnvironment.dist == Dist.CLIENT) {
-            if (tag != null) {
-                // 1) let vanilla apply its share‐tag (including enchantments)
-                super.readShareTag(stack, tag);
-                // 2) then deserialize our seed‐bag contents
+        if (FMLEnvironment.dist == Dist.CLIENT && tag != null) {
+            super.readShareTag(stack, tag);
+
+            if (tag.contains(CapabilitySeedBagContents.KEY.toString(), Tag.TAG_COMPOUND)) {
                 this.getContentsImpl(stack).ifPresent(data ->
                     data.deserializeNBT(tag.getCompound(CapabilitySeedBagContents.KEY.toString()))
                 );
             }
         } else {
-            // on server side just do vanilla
             super.readShareTag(stack, tag);
         }
     }
 
-    // @Nullable
-    // @Override
-    // public CompoundTag getShareTag(ItemStack stack) {
-    //     // 1) pull in whatever vanilla would have shared (including enchantments)
-    //     CompoundTag tag = super.getShareTag(stack);
-    //     if (tag == null) {
-    //         tag = new CompoundTag();
-    //     }
-    //     // 2) now add our seed-bag data
-    //     this.getContentsImpl(stack).ifPresent(data ->
-    //         tag.put(CapabilitySeedBagContents.KEY.toString(), data.serializeNBT())
-    //     );
-    //     return tag;
-    // }
-
     // @Override
     // public void readShareTag(ItemStack stack, @Nullable CompoundTag tag) {
-    //     // 1) let vanilla read its bits (enchantments, custom name, etc.)
-    //     super.readShareTag(stack, tag);
-    //     // 2) then restore our contents
-    //     if (tag != null && tag.contains(CapabilitySeedBagContents.KEY.toString())) {
-    //         this.getContentsImpl(stack).ifPresent(data ->
-    //             data.deserializeNBT(tag.getCompound(CapabilitySeedBagContents.KEY.toString()))
-    //         );
+    //     if (FMLEnvironment.dist == Dist.CLIENT && tag != null && tag.contains(KEY.toString())) {
+    //         // deserialize your bag data, but DO NOT call super.readShareTag → NBT stays intact
+    //         this.getContentsImpl(stack)
+    //             .ifPresent(data -> data.deserializeNBT(tag.getCompound(KEY.toString())));
+    //     } else {
+    //         super.readShareTag(stack, tag);
     //     }
     // }
+
+
+    @Override
+    public boolean shouldOverrideMultiplayerNbt() {
+        return true;
+    }
 
     @Override
     public boolean isEnchantable(@Nonnull ItemStack stack) {
