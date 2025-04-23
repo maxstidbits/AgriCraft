@@ -22,6 +22,8 @@ import com.infinityraider.agricraft.reference.AgriToolTips;
 import com.infinityraider.agricraft.reference.Names;
 import com.infinityraider.infinitylib.item.ItemBase;
 import net.minecraft.core.BlockPos;
+import net.minecraft.nbt.Tag;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.TranslatableComponent;
 import net.minecraft.world.InteractionHand;
@@ -39,12 +41,15 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.common.util.LazyOptional;
+import net.minecraftforge.fml.loading.FMLEnvironment;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.util.List;
 
 public class ItemSeedBag extends ItemBase implements IAgriSeedBagItem {
+    private static final int ENCHANT_VALUE = 10;
     private static final Component NAME_DEACTIVATED = new TranslatableComponent("item.agricraft.agri_seed_bag_inactive");
 
     private final List<Sorter> sorters;
@@ -58,9 +63,13 @@ public class ItemSeedBag extends ItemBase implements IAgriSeedBagItem {
         this.addSorter(DEFAULT_SORTER);
     }
 
+    public LazyOptional<CapabilitySeedBagContents.Impl> getContentsImpl(@Nonnull ItemStack stack) {
+        return CapabilitySeedBagContents.getInstance().getCapability(stack);
+    }
+
     @Override
-    public Contents getContents(ItemStack stack) {
-        return CapabilitySeedBagContents.getInstance().getCapability(stack).map(impl -> (Contents) impl).orElse(EMPTY);
+    public Contents getContents(@Nonnull ItemStack stack) {
+        return this.getContentsImpl(stack).map(impl -> (Contents) impl).orElse(EMPTY);
     }
 
     @Override
@@ -218,6 +227,70 @@ public class ItemSeedBag extends ItemBase implements IAgriSeedBagItem {
         return false;
     }
 
+    @Nullable
+    @Override
+    public CompoundTag getShareTag(ItemStack stack) {
+        // on the dedicated‐server, we want to send both enchantments and our own data
+        if (FMLEnvironment.dist == Dist.DEDICATED_SERVER) {
+            // grab whatever super would’ve shared (this already includes the vanilla “Enchantments” list)
+            final CompoundTag superTag = super.getShareTag(stack);
+            final CompoundTag tag = (superTag != null) ? superTag : new CompoundTag();
+            // now stick in our seed‐bag NBT
+            this.getContentsImpl(stack).ifPresent(data ->
+                tag.put(CapabilitySeedBagContents.KEY.toString(), data.serializeNBT())
+            );
+            return tag;
+        }
+        // on client or single‐player, fall back to default sharing
+        return super.getShareTag(stack);
+    }
+    
+    @Override
+    public void readShareTag(ItemStack stack, @Nullable CompoundTag tag) {
+        // on the client, we need to both apply vanilla bits (enchantments, display, etc.)
+        // and then pull in our own data
+        if (FMLEnvironment.dist == Dist.CLIENT) {
+            if (tag != null) {
+                // 1) let vanilla apply its share‐tag (including enchantments)
+                super.readShareTag(stack, tag);
+                // 2) then deserialize our seed‐bag contents
+                this.getContentsImpl(stack).ifPresent(data ->
+                    data.deserializeNBT(tag.getCompound(CapabilitySeedBagContents.KEY.toString()))
+                );
+            }
+        } else {
+            // on server side just do vanilla
+            super.readShareTag(stack, tag);
+        }
+    }
+
+    // @Nullable
+    // @Override
+    // public CompoundTag getShareTag(ItemStack stack) {
+    //     // 1) pull in whatever vanilla would have shared (including enchantments)
+    //     CompoundTag tag = super.getShareTag(stack);
+    //     if (tag == null) {
+    //         tag = new CompoundTag();
+    //     }
+    //     // 2) now add our seed-bag data
+    //     this.getContentsImpl(stack).ifPresent(data ->
+    //         tag.put(CapabilitySeedBagContents.KEY.toString(), data.serializeNBT())
+    //     );
+    //     return tag;
+    // }
+
+    // @Override
+    // public void readShareTag(ItemStack stack, @Nullable CompoundTag tag) {
+    //     // 1) let vanilla read its bits (enchantments, custom name, etc.)
+    //     super.readShareTag(stack, tag);
+    //     // 2) then restore our contents
+    //     if (tag != null && tag.contains(CapabilitySeedBagContents.KEY.toString())) {
+    //         this.getContentsImpl(stack).ifPresent(data ->
+    //             data.deserializeNBT(tag.getCompound(CapabilitySeedBagContents.KEY.toString()))
+    //         );
+    //     }
+    // }
+
     @Override
     public boolean isEnchantable(@Nonnull ItemStack stack) {
         return !this.isActivated(stack);
@@ -225,12 +298,12 @@ public class ItemSeedBag extends ItemBase implements IAgriSeedBagItem {
 
     @Override
     public int getEnchantmentValue() {
-        return 1;
+        return ENCHANT_VALUE;
     }
 
     @Override
     public int getItemEnchantability(ItemStack stack) {
-        return this.isActivated(stack) ? 0 : 1;
+        return this.isActivated(stack) ? 0 : ENCHANT_VALUE;
     }
 
     @Override
